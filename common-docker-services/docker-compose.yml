@@ -1,0 +1,180 @@
+# Local development services.
+#
+# Recommended:   ./setup.sh               (from the repo root: pick services, configure, start)
+# Manual:        docker compose --env-file ../.env up -d postgres redis
+#
+# Every value below has a default (${VAR:-default}), so this file also works without a .env file.
+# Ports are published on 127.0.0.1 only. Set BIND_IP=0.0.0.0 in .env to expose them on your network.
+
+name: common-docker-services
+
+x-service: &service
+  restart: unless-stopped
+  networks:
+    - app
+
+services:
+  postgres:
+    <<: *service
+    image: pgvector/pgvector:pg17
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mysql:
+    <<: *service
+    image: mysql:8.4
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-mysql}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-app}
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  mongo:
+    <<: *service
+    image: mongo:8.0
+    container_name: mongo
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    <<: *service
+    image: redis:7.4
+    container_name: redis
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  neo4j:
+    <<: *service
+    image: neo4j:5
+    container_name: neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-password123}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+      NEO4J_apoc_import_file_use__neo4j__config: "true"
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${BIND_IP:-127.0.0.1}:${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7474"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  adminer:
+    <<: *service
+    image: adminer:5
+    container_name: adminer
+    environment:
+      ADMINER_DESIGN: ${ADMINER_DESIGN:-flat}
+      ADMINER_DEFAULT_SERVER: ${ADMINER_DEFAULT_SERVER:-postgres}
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${ADMINER_PORT:-4000}:8080"
+
+  mailpit:
+    <<: *service
+    image: axllent/mailpit:v1.33
+    container_name: mailpit
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${BIND_IP:-127.0.0.1}:${MAILPIT_UI_PORT:-8025}:8025"
+    volumes:
+      - mailpit_data:/data
+
+  rabbitmq:
+    <<: *service
+    image: rabbitmq:4-management
+    container_name: rabbitmq
+    hostname: rabbitmq # RabbitMQ stores data per node name; a fixed hostname keeps it across re-creates
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin}
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672"
+      - "${BIND_IP:-127.0.0.1}:${RABBITMQ_UI_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_log:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  livekit:
+    <<: *service
+    image: livekit/livekit-server:v1.13
+    container_name: livekit
+    # Dev mode: API key "devkey", secret "secret". --node-ip 127.0.0.1 = clients on this machine.
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${LIVEKIT_PORT:-7880}:7880" # HTTP / WebSocket API
+      - "${BIND_IP:-127.0.0.1}:${LIVEKIT_RTC_TCP_PORT:-7881}:7881" # WebRTC over TCP
+      - "${BIND_IP:-127.0.0.1}:${LIVEKIT_RTC_UDP_PORT:-7882}:7882/udp" # WebRTC over UDP
+
+volumes:
+  pg_db:
+  mysql_data:
+  mongo_data:
+  redis_data:
+  neo4j_data:
+  neo4j_import:
+  neo4j_plugins:
+  neo4j_logs:
+  mailpit_data:
+  rabbitmq_data:
+  rabbitmq_log:
+
+networks:
+  app:
+    name: app
+    driver: bridge

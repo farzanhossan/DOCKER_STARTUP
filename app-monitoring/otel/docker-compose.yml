@@ -1,0 +1,73 @@
+# Observability stack: OpenTelemetry Collector -> Jaeger (traces) + Prometheus (metrics) -> Grafana.
+#
+# Recommended:   ./setup.sh otel          (from the repo root)
+# Manual:        docker compose --env-file ../../.env up -d
+#
+# Point your app's OpenTelemetry SDK at:  http://localhost:4318 (OTLP/HTTP)  or  localhost:4317 (OTLP/gRPC)
+
+name: app-monitoring-otel
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.165.0
+    container_name: otel-collector
+    restart: unless-stopped
+    volumes:
+      - ./collector/config.yml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${OTEL_GRPC_PORT:-4317}:4317" # OTLP gRPC
+      - "${BIND_IP:-127.0.0.1}:${OTEL_HTTP_PORT:-4318}:4318" # OTLP HTTP
+    depends_on:
+      - jaeger
+
+  jaeger:
+    # 2.20 is the newest Jaeger that still serves the /api/* endpoints Grafana's Jaeger datasource uses
+    image: jaegertracing/jaeger:2.20.0
+    container_name: jaeger
+    restart: unless-stopped
+    environment:
+      JAEGER_LISTEN_HOST: 0.0.0.0
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${JAEGER_UI_PORT:-16686}:16686" # Jaeger UI
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # lets Prometheus scrape apps running on your machine (Linux too)
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro # Prometheus + Jaeger datasources
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-4444}:3000"
+    depends_on:
+      - prometheus
+      - jaeger
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  grafana-storage:
+  prometheus_data:

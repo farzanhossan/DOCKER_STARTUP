@@ -1,0 +1,6 @@
+cluster.name: dev-cluster
+network.host: 0.0.0.0
+
+# Local development: no TLS, no login. Do NOT expose this to a network you don't trust.
+xpack.security.enabled: false
+xpack.license.self_generated.type: basic

@@ -1,0 +1,14 @@
+# Your local settings (written by ./setup.sh)
+.env
+.env.tmp
+*.env
+!.env.example
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+*.log

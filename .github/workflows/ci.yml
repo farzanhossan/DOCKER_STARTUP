@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck setup.sh install.sh
+
+      - name: .env.example is up to date
+        run: diff <(./setup.sh _env-example) .env.example
+
+      - name: Validate compose files
+        run: |
+          for f in common-docker-services/docker-compose.yml \
+                   app-monitoring/otel/docker-compose.yml \
+                   app-monitoring/elk/docker-compose.yml; do
+            echo "::group::$f"
+            docker compose --env-file .env.example -f "$f" config -q
+            echo "::endgroup::"
+          done
+
+  smoke-test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start databases, mail and queue
+        run: ./setup.sh postgres mysql mongo redis mailpit rabbitmq
+
+      - name: Start observability stack
+        run: ./setup.sh postgres redis otel
+
+      - name: Status
+        run: ./setup.sh status
+
+      - name: Check endpoints
+        run: |
+          docker exec postgres pg_isready -U postgres
+          docker exec redis redis-cli ping
+          retry="--retry 15 --retry-delay 2 --retry-all-errors"
+          curl -fsS $retry http://localhost:9090/-/ready
+          curl -fsS $retry http://localhost:4444/api/health
+          curl -fsS $retry http://localhost:16686/ >/dev/null
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}'); do echo "::group::$c"; docker logs --tail 80 "$c" 2>&1; echo "::endgroup::"; done
+
+      - name: Stop
+        if: always()
+        run: ./setup.sh down
