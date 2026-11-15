@@ -266,6 +266,7 @@ docker system prune                # clean up stopped containers, unused network
 | Problem | Fix |
 |---|---|
 | **"Port … is already in use"** | `setup.sh` offers the next free port. You can also set it yourself in `.env`. |
+| **Kibana takes minutes to open** | Normal on its first start — it sets up its system indices (3–5 min on a laptop). Later starts are faster. |
 | **Kibana / Elasticsearch keeps restarting** | Not enough memory. Give Docker 6 GB+ or run fewer services next to `elk`. |
 | **`permission denied … docker.sock`** (Linux) | Your user isn't in the `docker` group yet: run `newgrp docker` or log out and back in. |
 | **A changed password doesn't work** | The old one is stored in the data volume — see [Data & reset](#data--reset). |
