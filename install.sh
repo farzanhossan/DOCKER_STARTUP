@@ -41,8 +41,10 @@ main() {
     exec bash ./setup.sh "$@"
   elif (: </dev/tty) 2>/dev/null; then
     exec bash ./setup.sh "$@" </dev/tty
+  elif [ "$#" -gt 0 ]; then
+    exec bash ./setup.sh "$@" # service names / subcommands never need a terminal
   else
-    exec bash ./setup.sh --yes "$@"
+    exec bash ./setup.sh --yes # no terminal (CI): use the default selection
   fi
 }
 
